@@ -13,6 +13,7 @@ pub fn generate_recv_code_for_packet(pack_descr: &PackDesc) -> TokenStream {
     let ref_name = format_ident!("{}Ref", pack_descr.name);
 
     let mut getters = Vec::with_capacity(pack_descr.fields.len());
+    let mut debug_fields = Vec::new();
     let mut field_validators = Vec::new();
 
     let mut off = 0usize;
@@ -42,6 +43,7 @@ pub fn generate_recv_code_for_packet(pack_descr: &PackDesc) -> TokenStream {
                         val
                     }
                 });
+                debug_fields.push(get_raw_name);
 
                 if f.map.convert_may_fail {
                     let get_val = get_raw_field_code(f, off, quote! { payload });
@@ -73,6 +75,7 @@ pub fn generate_recv_code_for_packet(pack_descr: &PackDesc) -> TokenStream {
                     val
                 }
             });
+            debug_fields.push(get_name.to_owned());
             off += size_bytes;
         } else {
             assert_eq!(field_index, pack_descr.fields.len() - 1);
@@ -147,6 +150,21 @@ pub fn generate_recv_code_for_packet(pack_descr: &PackDesc) -> TokenStream {
         }
     };
 
+    let mut fields = Vec::with_capacity(debug_fields.len());
+    for field in debug_fields {
+        fields.push(quote! {.field(stringify!(#field), &self.#field())})
+    }
+
+    let debug = quote! {
+        impl std::fmt::Debug for #ref_name<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.debug_struct(stringify!(#ref_name))
+                #(#fields)*
+                .finish()
+            }
+        }
+    };
+
     quote! {
         #[doc = #struct_comment]
         #[doc = "Contains a reference to an underlying buffer, contains accessor methods to retrieve data."]
@@ -156,6 +174,7 @@ pub fn generate_recv_code_for_packet(pack_descr: &PackDesc) -> TokenStream {
 
             #validator
         }
+        #debug
     }
 }
 
@@ -534,6 +553,7 @@ pub fn generate_code_for_parse(recv_packs: &RecvPackets) -> TokenStream {
 
     quote! {
         #[doc = "All possible packets enum"]
+        #[derive(Debug)]
         pub enum #union_enum_name<'a> {
             #(#pack_enum_variants),*,
             Unknown(#unknown_var<'a>)

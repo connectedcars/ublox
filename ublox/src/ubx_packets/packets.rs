@@ -13,6 +13,142 @@ use ublox_derive::{
     ubx_packet_send,
 };
 
+///  Position solution in ECEF
+#[ubx_packet_recv]
+#[ubx(class = 1, id = 1, fixed_payload_len = 20)]
+struct NavPosEcef {
+    /// GPS Millisecond Time of Week
+    itow: u32,
+
+    /// ECEF X coordinate
+    ecef_x: i32,
+
+    /// ECEF Y coordinate
+    ecef_y: i32,
+
+    /// ECEF Z coordinate
+    ecef_z: i32,
+
+    /// Position Accuracy Estimate
+    p_acc: u32,
+}
+
+///  Velocity solution in ECEF
+#[ubx_packet_recv]
+#[ubx(class = 1, id = 0x11, fixed_payload_len = 20)]
+struct NavVelEcef {
+    /// GPS Millisecond Time of Week
+    itow: u32,
+
+    /// ECEF X velocity
+    ecef_vx: i32,
+
+    /// ECEF Y velocity
+    ecef_vy: i32,
+
+    /// ECEF Z velocity
+    ecef_vz: i32,
+
+    /// Speed Accuracy Estimate
+    s_acc: u32,
+}
+
+///  GPS time solution
+#[ubx_packet_recv]
+#[ubx(class = 1, id = 0x20, fixed_payload_len = 16)]
+struct NavTimeGps {
+    /// GPS time of the week of the navigation epoch
+    itow: u32,
+
+    /// Fractional part of ITOW (range: +/- 500000). The precise GPS time of week in seconds is: (iTOW * 1e-3) + (fTOW * 1e-9)
+    ftow: i32,
+
+    /// GPS week number of the navitgation epoch
+    week: i16,
+
+    /// GPS leap seconds (GPS-UTC)
+    leap_s: i8,
+
+    /// Validity Flags
+    #[ubx(map_type = NavTimeGpsFlags)]
+    valid: u8,
+
+    /// Time Accuracy Estimate
+    t_acc: u32,
+}
+
+#[ubx_extend_bitflags]
+#[ubx(from, rest_reserved)]
+bitflags! {
+    /// Validity flags for `NavTimeGps`
+    pub struct NavTimeGpsFlags: u8 {
+        const TOW_VALID = 1;
+        const WEEK_VALID = 2;
+        const LEAP_S_VALID = 4;
+    }
+}
+
+///  Position solution in ECEF
+#[ubx_packet_recv]
+#[ubx(class = 1, id = 0x60, fixed_payload_len = 16)]
+struct NavAopStatus {
+    /// GPS time of the week of the navigation epoch
+    itow: u32,
+
+    /// AssistNow Autonomous configuration
+    #[ubx(map_type = NavAopStatusCfg)]
+    aop_cfg: u8,
+
+    /// AssistNow Autonomous subsystem is idle (0) or running (not 0)
+    status: u8,
+
+    /// Reserved
+    reserved: [u8; 10],
+}
+
+#[ubx_extend_bitflags]
+#[ubx(from, rest_reserved)]
+bitflags! {
+    /// Bitfield aopCfg for `NavAopStatus`
+    pub struct NavAopStatusCfg: u8 {
+        const USE_AOP = 1;
+    }
+}
+
+///  Position solution in ECEF
+#[ubx_packet_recv]
+#[ubx(class = 0x13, id = 0x60, fixed_payload_len = 8)]
+struct NavAopStatus {
+    /// Type of acknowledgment:
+    /// 0: The message was not used by the
+    /// receiver (see infoCode field for an
+    /// indication of why)
+    /// 1: The message was accepted for use by
+    /// the receiver (the infoCode field will be 0)
+    ack_type: u8,
+
+    /// Message version (0x00 for this version)
+    version: u8,
+
+    /// Provides greater information on what the
+    /// receiver chose to do with the message contents:
+    /// 0: The receiver accepted the data
+    /// 1: The receiver does not know the time so it cannot use the data (To resolve this a UBX-MGA-INI-TIME_UTC message should be supplied first)
+    /// 2: The message version is not supported by the receiver
+    /// 3: The message size does not match the message version
+    /// 4: The message data could not be stored to the database
+    /// 5: The receiver is not ready to use the message data
+    /// 6: The message type is unknown
+    info_code: u8,
+
+    /// UBX message ID of the acknowledged message
+    msg_id: u8,
+
+    /// The first 4 bytes of the acknowledged message's payload
+    msg_payload_start: [u8; 4]
+}
+
+
 /// Geodetic Position Solution
 #[ubx_packet_recv]
 #[ubx(class = 1, id = 2, fixed_payload_len = 28)]
@@ -1038,6 +1174,20 @@ struct MonVer {
     extension: [u8; 0],
 }
 
+/// Receiver/Software Version
+#[ubx_packet_recv]
+#[ubx(class = 0x13, id = 0x80, max_payload_len = 164)]
+struct MgaDbd {
+    #[ubx(map_type = Vec<u8>, from = mga_dbd::convert_to_payload)]
+    data: [u8; 0],
+}
+
+mod mga_dbd {
+    pub(crate) fn convert_to_payload(bytes: &[u8]) -> Vec<u8> {
+        bytes.to_vec()
+    }
+}
+
 mod mon_ver {
     pub(crate) fn convert_to_str_unchecked(bytes: &[u8]) -> &str {
         let null_pos = bytes
@@ -1079,9 +1229,13 @@ mod mon_ver {
 define_recv_packets!(
     enum PacketRef {
         _ = UbxUnknownPacketRef,
+        NavPosEcef,
+        NavVelEcef,
         NavPosLlh,
         NavStatus,
+        NavAopStatus,
         NavDop,
+        NavTimeGps,
         NavPosVelTime,
         NavSolution,
         NavVelNed,
@@ -1092,6 +1246,7 @@ define_recv_packets!(
         CfgPrtSpi,
         CfgPrtUart,
         CfgNav5,
-        MonVer
+        MonVer,
+        MgaDbd
     }
 );
