@@ -1,7 +1,7 @@
 use crate::types::{
     BitFlagsMacro, BitFlagsMacroItem, PackDesc, PackField, PackFieldMapDesc, PackHeader,
     PacketFlag, PayloadLen, RecvPackets, UbxEnumRestHandling, UbxExtendEnum, UbxTypeFromFn,
-    UbxTypeIntoFn,
+    UbxTypeIntoFn, UbxReprType,
 };
 use proc_macro2::{Span, TokenStream};
 use quote::ToTokens;
@@ -70,19 +70,26 @@ pub fn parse_ubx_enum_type(
             )
         })?;
     let meta = attr.parse_meta()?;
+    let repr_type;
     let repr: Type = match meta {
         syn::Meta::List(list) if list.nested.len() == 1 => {
             if let syn::NestedMeta::Meta(syn::Meta::Path(ref p)) = list.nested[0] {
-                if !p.is_ident("u8") {
-                    unimplemented!();
-                }
+                repr_type = p.clone();
+
             } else {
                 return Err(Error::new(
                     list.nested[0].span(),
                     "Invalid repr attribute for ubx_type enum",
                 ));
             }
-            syn::parse_quote! { u8 }
+            if repr_type.is_ident("u8") {
+                syn::parse_quote! { u8 }
+            } else if repr_type.is_ident("i8") {
+                syn::parse_quote! { i8 }
+            } else {
+                unimplemented!();
+            }
+            
         }
         _ => {
             return Err(Error::new(
@@ -108,11 +115,44 @@ pub fn parse_ubx_enum_type(
             ..
         }) = expr
         {
-            litint.base10_parse::<u8>()?
+            if repr_type.is_ident("u8") {
+                UbxReprType::U8(litint.base10_parse::<u8>()?)
+            } else if repr_type.is_ident("i8") {
+                UbxReprType::I8(litint.base10_parse::<i8>()?)
+            } else {
+                unimplemented!();
+            }
+        } else if let syn::Expr::Unary(syn::ExprUnary{
+            op: syn::UnOp::Neg(syn::token::Sub{..}),
+            expr: boxedlit,
+            ..
+        }) = expr
+        {   
+            if let syn::Expr::Lit(syn::ExprLit {
+                lit: syn::Lit::Int(litint),
+                ..
+            }) = *boxedlit
+            {
+                if repr_type.is_ident("u8") {
+                    return Err(Error::new(
+                        litint.span(),
+                        "Invalid value for ubx_type enum variant",
+                    ));
+                } else if repr_type.is_ident("i8") {
+                    UbxReprType::I8(-1 * litint.base10_parse::<i8>()?)
+                } else {
+                    unimplemented!();
+                }
+            } else {
+                return Err(Error::new(
+                    boxedlit.span(),
+                    "Invalid value for ubx_type enum variant",
+                ));
+            }
         } else {
             return Err(Error::new(
-                expr.span(),
-                "Invalid variant value for ubx_type enum",
+                var_sp,
+                "Invalid variant for ubx_type enum",
             ));
         };
         variants.push((var.ident, variant_value));
