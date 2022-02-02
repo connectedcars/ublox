@@ -166,7 +166,7 @@ pub enum UbxReprType {
     I8(i8),
 }
 
-impl UbxReprType { 
+impl UbxReprType {
     pub fn as_u8(&self) -> u8 {
         match self {
             UbxReprType::U8(x) => *x,

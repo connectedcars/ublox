@@ -5,10 +5,10 @@ use super::{
 use crate::error::{MemWriterError, ParserError};
 use bitflags::bitflags;
 use chrono::prelude::*;
-use serde::{Serialize, Deserialize};
 use core::fmt::{self, Debug};
 use num_traits::cast::{FromPrimitive, ToPrimitive};
 use num_traits::float::FloatCore;
+use serde::{Deserialize, Serialize};
 use ublox_derive::{
     define_recv_packets, ubx_extend, ubx_extend_bitflags, ubx_packet_recv, ubx_packet_recv_send,
     ubx_packet_send,
@@ -146,9 +146,8 @@ struct MgaAck {
     msg_id: u8,
 
     /// The first 4 bytes of the acknowledged message's payload
-    msg_payload_start: [u8; 4]
+    msg_payload_start: [u8; 4],
 }
-
 
 /// Geodetic Position Solution
 #[ubx_packet_recv]
@@ -539,8 +538,6 @@ enum NavStatusFlags2 {
     Inactive = 3,
 }
 
-
-
 /// Space vehicle information
 #[ubx_packet_recv]
 #[ubx(class = 1, id = 0x26, fixed_payload_len = 24)]
@@ -594,7 +591,7 @@ struct NavTimeLs {
     reserved2: [u8; 3],
     /// Validity flags
     #[ubx(map_type = LsValidityFlags)]
-    valid: u8
+    valid: u8,
 }
 
 /// Information source for the current number of leap seconds
@@ -632,7 +629,6 @@ pub enum LsSourceChange {
     NavIC = 7,
 }
 
-
 #[ubx_extend_bitflags]
 #[ubx(from, rest_reserved)]
 bitflags! {
@@ -644,8 +640,6 @@ bitflags! {
         const VALID_TIME_TO_LS_EVENT = 2;
     }
 }
-
-
 
 /// Space vehicle information
 #[ubx_packet_recv]
@@ -672,7 +666,7 @@ struct NavSvInfo {
 pub enum GlobalFlags {
     AntarisAntaris4 = 0,
     Ublox5 = 1,
-    Ublox6= 2,
+    Ublox6 = 2,
     Ublox7 = 3,
     Ublox8UbloxM8 = 4,
 }
@@ -702,7 +696,6 @@ bitflags! {
     }
 }
 
-
 /// Signal Quality
 #[ubx_extend]
 #[ubx(from, rest_reserved)]
@@ -711,15 +704,13 @@ bitflags! {
 pub enum BitFieldQuality {
     NoSignal = 0,
     SearchingSignal = 1,
-    SignalAcquired= 2,
+    SignalAcquired = 2,
     SignalDetectedButUnusable = 3,
     CodeLockedAndTimeSynchronized = 4,
     CodeAndCarrierLockedAndTimeSynchronized = 5,
     CodeAndCarrierLockedAndTimeSynchronizedAndPseudorangeValid = 6,
     CodeAndCarrierLockedAndTimeSynchronizedAndPseudorangeAndCodePhaseValid = 7,
 }
-
-
 
 mod nav_svinfo {
     use super::*;
@@ -755,7 +746,12 @@ mod nav_svinfo {
             let cno = iter.next().unwrap();
             let elev = iter.next().unwrap();
             let azim = [*iter.next().unwrap(), *iter.next().unwrap()];
-            let pr_res = [*iter.next().unwrap(), *iter.next().unwrap(), *iter.next().unwrap(), *iter.next().unwrap()];
+            let pr_res = [
+                *iter.next().unwrap(),
+                *iter.next().unwrap(),
+                *iter.next().unwrap(),
+                *iter.next().unwrap(),
+            ];
             res.push(SvInfo {
                 chn: *chn,
                 svid: *svid,
@@ -798,7 +794,6 @@ struct NavSbas {
     #[ubx(map_type = Vec<nav_sbas::SbasInfo>, from = nav_sbas::convert_to_payload)]
     data: [u8; 0],
 }
-
 
 /// Signal Quality
 #[ubx_extend]
@@ -855,10 +850,8 @@ pub enum BitFieldStatusFlags {
     GoodIntegrity = 2,
 }
 
-
 mod nav_sbas {
     use super::*;
-
 
     #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
     pub struct SbasInfo {
@@ -879,7 +872,7 @@ mod nav_sbas {
         /// Reserved
         reserved3: u16,
         /// Ionosphere correction in [cm]
-        ic: i16
+        ic: i16,
     }
 
     pub(crate) fn convert_to_payload(bytes: &[u8]) -> Vec<SbasInfo> {
@@ -949,7 +942,6 @@ bitflags! {
 mod nav_sat {
     use super::*;
 
-
     #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
     pub struct SatInfo {
         /// GNSS identifier
@@ -1002,7 +994,7 @@ mod nav_sat {
         pr_corr_used: bool,
         /// Carrier range corrections have been used for a signal
         cr_corr_used: bool,
-        /// Range rate (Doppler) corrections have been used for a signal 
+        /// Range rate (Doppler) corrections have been used for a signal
         do_corr_used: bool,
         /// CLAS corrections have been used for a signal
         clas_corr_used: bool,
@@ -1012,23 +1004,23 @@ mod nav_sat {
         fn from_u32(long: u32) -> Self {
             Self {
                 quality_ind: QualityIndicator::from((long & 0b111) as u8),
-                sv_used:          (long & 0b1111) != 0,
+                sv_used: (long & 0b1111) != 0,
                 health: Health::from(((long >> 4) & 0b11) as u8),
-                diff_corr:        (long & 0b1111111) != 0,
-                smoothed:         (long & 0b11111111) != 0,
+                diff_corr: (long & 0b1111111) != 0,
+                smoothed: (long & 0b11111111) != 0,
                 orbit_source: OrbitSource::from(((long >> 8) & 0b111) as u8),
-                eph_available:    (long & 0b11111111111) != 0,
-                alm_available:    (long & 0b111111111111) != 0,
-                ano_available:    (long & 0b1111111111111) != 0,
-                aop_available:    (long & 0b11111111111111) != 0,
-                sbas_corr_used:   (long & 0b1111111111111111) != 0,
-                rtcm_corr_used:   (long & 0b11111111111111111) != 0,
-                slas_corr_used:   (long & 0b111111111111111111) != 0,
+                eph_available: (long & 0b11111111111) != 0,
+                alm_available: (long & 0b111111111111) != 0,
+                ano_available: (long & 0b1111111111111) != 0,
+                aop_available: (long & 0b11111111111111) != 0,
+                sbas_corr_used: (long & 0b1111111111111111) != 0,
+                rtcm_corr_used: (long & 0b11111111111111111) != 0,
+                slas_corr_used: (long & 0b111111111111111111) != 0,
                 spartn_corr_used: (long & 0b1111111111111111111) != 0,
-                pr_corr_used:     (long & 0b11111111111111111111) != 0,
-                cr_corr_used:     (long & 0b111111111111111111111) != 0,
-                do_corr_used:     (long & 0b1111111111111111111111) != 0,
-                clas_corr_used:   (long & 0b11111111111111111111111) != 0,
+                pr_corr_used: (long & 0b11111111111111111111) != 0,
+                cr_corr_used: (long & 0b111111111111111111111) != 0,
+                do_corr_used: (long & 0b1111111111111111111111) != 0,
+                clas_corr_used: (long & 0b11111111111111111111111) != 0,
             }
         }
     }
@@ -1086,7 +1078,12 @@ mod nav_sat {
             let elev = iter.next().unwrap();
             let azim = [*iter.next().unwrap(), *iter.next().unwrap()];
             let prres = [*iter.next().unwrap(), *iter.next().unwrap()];
-            let flags = [*iter.next().unwrap(), *iter.next().unwrap(), *iter.next().unwrap(), *iter.next().unwrap()];
+            let flags = [
+                *iter.next().unwrap(),
+                *iter.next().unwrap(),
+                *iter.next().unwrap(),
+                *iter.next().unwrap(),
+            ];
             res.push(SatInfo {
                 gnssid: *gnssid,
                 svid: *svid,
@@ -1100,7 +1097,6 @@ mod nav_sat {
         res
     }
 }
-
 
 #[ubx_packet_send]
 #[ubx(
@@ -1734,11 +1730,16 @@ mod mga_dbd {
     }
 }
 
+pub struct SerializingIterator<T, U>(T)
+where
+    T: Iterator<Item = U> + Clone,
+    U: serde::Serialize + Debug;
 
-pub struct SerializingIterator<T, U> (T) where T: Iterator<Item=U> + Clone, U: serde::Serialize + Debug;
-
-
-impl<T, U> serde::Serialize for SerializingIterator<T, U> where T: Iterator<Item=U> + Clone, U: serde::Serialize + Debug {
+impl<T, U> serde::Serialize for SerializingIterator<T, U>
+where
+    T: Iterator<Item = U> + Clone,
+    U: serde::Serialize + Debug,
+{
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -1747,19 +1748,26 @@ impl<T, U> serde::Serialize for SerializingIterator<T, U> where T: Iterator<Item
     }
 }
 
-impl<T, U> Iterator for SerializingIterator<T, U> where T: Iterator<Item=U> + Clone, U: serde::Serialize + Debug {
+impl<T, U> Iterator for SerializingIterator<T, U>
+where
+    T: Iterator<Item = U> + Clone,
+    U: serde::Serialize + Debug,
+{
     type Item = U;
     fn next(&mut self) -> Option<Self::Item> {
         self.0.next()
     }
 }
 
-impl<T, U> fmt::Debug for SerializingIterator<T, U> where T: Iterator<Item=U> + Clone, U: serde::Serialize + Debug {
+impl<T, U> fmt::Debug for SerializingIterator<T, U>
+where
+    T: Iterator<Item = U> + Clone,
+    U: serde::Serialize + Debug,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(self.0.clone()).finish()
     }
 }
-
 
 /// Receiver/Software Version
 #[ubx_packet_recv]
@@ -1778,7 +1786,6 @@ struct MonVer {
           is_valid = mon_ver::is_extension_valid)]
     extension: [u8; 0],
 }
-
 
 mod mon_ver {
     use super::SerializingIterator;
@@ -1815,11 +1822,12 @@ mod mon_ver {
         }
     }
 
-    pub(crate) fn extension_to_iter(payload: &[u8]) ->  SerializingIterator<impl Iterator<Item = &str> + Clone, &str> {
+    pub(crate) fn extension_to_iter(
+        payload: &[u8],
+    ) -> SerializingIterator<impl Iterator<Item = &str> + Clone, &str> {
         SerializingIterator(payload.chunks(30).map(|x| convert_to_str_unchecked(x)))
     }
 }
-
 
 define_recv_packets!(
     enum PacketRef {
@@ -1847,6 +1855,6 @@ define_recv_packets!(
         CfgNav5,
         MonVer,
         MgaDbd,
-        MgaAck
+        MgaAck,
     }
 );

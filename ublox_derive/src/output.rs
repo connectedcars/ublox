@@ -351,12 +351,11 @@ pub fn generate_send_code_for_packet(pack_descr: &PackDesc) -> TokenStream {
 }
 
 pub fn generate_code_to_extend_enum(ubx_enum: &UbxExtendEnum) -> TokenStream {
-
     let name = &ubx_enum.name;
     let attrs = &ubx_enum.attrs;
     let mut variants = ubx_enum.variants.clone();
     //let mut variants: Vec<(Ident, u8)> = Vec::with_capacity(ubx_enum.variants.len());
-    
+
     let first = variants[0].clone();
     match first {
         (_, UbxReprType::U8(_)) => {
@@ -375,11 +374,7 @@ pub fn generate_code_to_extend_enum(ubx_enum: &UbxExtendEnum) -> TokenStream {
                 let defined: HashSet<i8> = ubx_enum.variants.iter().map(|x| x.1.as_i8()).collect();
                 for i in i8::MIN..=i8::MAX {
                     if !defined.contains(&i) {
-                        let neg = if i.is_negative() {
-                            "Neg"
-                        } else {
-                            ""
-                        };
+                        let neg = if i.is_negative() { "Neg" } else { "" };
                         let name = format_ident!("Reserved{}{}", neg, (i as i16).abs() as u8);
                         variants.push((name, UbxReprType::I8(i)));
                     }
@@ -387,7 +382,6 @@ pub fn generate_code_to_extend_enum(ubx_enum: &UbxExtendEnum) -> TokenStream {
             }
         }
     }
-
 
     let repr_ty = &ubx_enum.repr;
     let from_code = match ubx_enum.from_fn {

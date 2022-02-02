@@ -1,7 +1,7 @@
 use crate::types::{
     BitFlagsMacro, BitFlagsMacroItem, PackDesc, PackField, PackFieldMapDesc, PackHeader,
-    PacketFlag, PayloadLen, RecvPackets, UbxEnumRestHandling, UbxExtendEnum, UbxTypeFromFn,
-    UbxTypeIntoFn, UbxReprType,
+    PacketFlag, PayloadLen, RecvPackets, UbxEnumRestHandling, UbxExtendEnum, UbxReprType,
+    UbxTypeFromFn, UbxTypeIntoFn,
 };
 use proc_macro2::{Span, TokenStream};
 use quote::ToTokens;
@@ -75,7 +75,6 @@ pub fn parse_ubx_enum_type(
         syn::Meta::List(list) if list.nested.len() == 1 => {
             if let syn::NestedMeta::Meta(syn::Meta::Path(ref p)) = list.nested[0] {
                 repr_type = p.clone();
-
             } else {
                 return Err(Error::new(
                     list.nested[0].span(),
@@ -89,7 +88,6 @@ pub fn parse_ubx_enum_type(
             } else {
                 unimplemented!();
             }
-            
         }
         _ => {
             return Err(Error::new(
@@ -122,12 +120,12 @@ pub fn parse_ubx_enum_type(
             } else {
                 unimplemented!();
             }
-        } else if let syn::Expr::Unary(syn::ExprUnary{
-            op: syn::UnOp::Neg(syn::token::Sub{..}),
+        } else if let syn::Expr::Unary(syn::ExprUnary {
+            op: syn::UnOp::Neg(syn::token::Sub { .. }),
             expr: boxedlit,
             ..
         }) = expr
-        {   
+        {
             if let syn::Expr::Lit(syn::ExprLit {
                 lit: syn::Lit::Int(litint),
                 ..
@@ -150,10 +148,7 @@ pub fn parse_ubx_enum_type(
                 ));
             }
         } else {
-            return Err(Error::new(
-                var_sp,
-                "Invalid variant for ubx_type enum",
-            ));
+            return Err(Error::new(var_sp, "Invalid variant for ubx_type enum"));
         };
         variants.push((var.ident, variant_value));
     }
