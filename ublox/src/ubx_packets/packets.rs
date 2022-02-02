@@ -5,13 +5,149 @@ use super::{
 use crate::error::{MemWriterError, ParserError};
 use bitflags::bitflags;
 use chrono::prelude::*;
-use core::fmt;
+use core::fmt::{self, Debug};
 use num_traits::cast::{FromPrimitive, ToPrimitive};
 use num_traits::float::FloatCore;
+use serde::{Deserialize, Serialize};
 use ublox_derive::{
     define_recv_packets, ubx_extend, ubx_extend_bitflags, ubx_packet_recv, ubx_packet_recv_send,
     ubx_packet_send,
 };
+
+///  Position solution in ECEF
+#[ubx_packet_recv]
+#[ubx(class = 1, id = 1, fixed_payload_len = 20)]
+struct NavPosEcef {
+    /// GPS Millisecond Time of Week
+    itow: u32,
+
+    /// ECEF X coordinate
+    ecef_x: i32,
+
+    /// ECEF Y coordinate
+    ecef_y: i32,
+
+    /// ECEF Z coordinate
+    ecef_z: i32,
+
+    /// Position Accuracy Estimate
+    p_acc: u32,
+}
+
+///  Velocity solution in ECEF
+#[ubx_packet_recv]
+#[ubx(class = 1, id = 0x11, fixed_payload_len = 20)]
+struct NavVelEcef {
+    /// GPS Millisecond Time of Week
+    itow: u32,
+
+    /// ECEF X velocity
+    ecef_vx: i32,
+
+    /// ECEF Y velocity
+    ecef_vy: i32,
+
+    /// ECEF Z velocity
+    ecef_vz: i32,
+
+    /// Speed Accuracy Estimate
+    s_acc: u32,
+}
+
+///  GPS time solution
+#[ubx_packet_recv]
+#[ubx(class = 1, id = 0x20, fixed_payload_len = 16)]
+struct NavTimeGps {
+    /// GPS time of the week of the navigation epoch
+    itow: u32,
+
+    /// Fractional part of ITOW (range: +/- 500000). The precise GPS time of week in seconds is: (iTOW * 1e-3) + (fTOW * 1e-9)
+    ftow: i32,
+
+    /// GPS week number of the navitgation epoch
+    week: i16,
+
+    /// GPS leap seconds (GPS-UTC)
+    leap_s: i8,
+
+    /// Validity Flags
+    #[ubx(map_type = NavTimeGpsFlags)]
+    valid: u8,
+
+    /// Time Accuracy Estimate
+    t_acc: u32,
+}
+
+#[ubx_extend_bitflags]
+#[ubx(from, rest_reserved)]
+bitflags! {
+    /// Validity flags for `NavTimeGps`
+    pub struct NavTimeGpsFlags: u8 {
+        const TOW_VALID = 1;
+        const WEEK_VALID = 2;
+        const LEAP_S_VALID = 4;
+    }
+}
+
+///  Position solution in ECEF
+#[ubx_packet_recv]
+#[ubx(class = 1, id = 0x60, fixed_payload_len = 16)]
+struct NavAopStatus {
+    /// GPS time of the week of the navigation epoch
+    itow: u32,
+
+    /// AssistNow Autonomous configuration
+    #[ubx(map_type = NavAopStatusCfg)]
+    aop_cfg: u8,
+
+    /// AssistNow Autonomous subsystem is idle (0) or running (not 0)
+    status: u8,
+
+    /// Reserved
+    reserved: [u8; 10],
+}
+
+#[ubx_extend_bitflags]
+#[ubx(from, rest_reserved)]
+bitflags! {
+    /// Bitfield aopCfg for `NavAopStatus`
+    pub struct NavAopStatusCfg: u8 {
+        const USE_AOP = 1;
+    }
+}
+
+///  Position solution in ECEF
+#[ubx_packet_recv]
+#[ubx(class = 0x13, id = 0x60, fixed_payload_len = 8)]
+struct MgaAck {
+    /// Type of acknowledgment:
+    /// 0: The message was not used by the
+    /// receiver (see infoCode field for an
+    /// indication of why)
+    /// 1: The message was accepted for use by
+    /// the receiver (the infoCode field will be 0)
+    ack_type: u8,
+
+    /// Message version (0x00 for this version)
+    version: u8,
+
+    /// Provides greater information on what the
+    /// receiver chose to do with the message contents:
+    /// 0: The receiver accepted the data
+    /// 1: The receiver does not know the time so it cannot use the data (To resolve this a UBX-MGA-INI-TIME_UTC message should be supplied first)
+    /// 2: The message version is not supported by the receiver
+    /// 3: The message size does not match the message version
+    /// 4: The message data could not be stored to the database
+    /// 5: The receiver is not ready to use the message data
+    /// 6: The message type is unknown
+    info_code: u8,
+
+    /// UBX message ID of the acknowledged message
+    msg_id: u8,
+
+    /// The first 4 bytes of the acknowledged message's payload
+    msg_payload_start: [u8; 4],
+}
 
 /// Geodetic Position Solution
 #[ubx_packet_recv]
@@ -318,7 +454,7 @@ struct NavSolution {
 #[ubx_extend]
 #[ubx(from, rest_reserved)]
 #[repr(u8)]
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
 pub enum GpsFix {
     NoFix = 0,
     DeadReckoningOnly = 1,
@@ -346,7 +482,7 @@ bitflags! {
 
 /// Fix Status Information
 #[repr(transparent)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Serialize, Deserialize)]
 pub struct FixStatusInfo(u8);
 
 impl FixStatusInfo {
@@ -394,12 +530,572 @@ pub enum MapMatchingStatus {
 #[ubx_extend]
 #[ubx(from, rest_reserved)]
 #[repr(u8)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 enum NavStatusFlags2 {
     Acquisition = 0,
     Tracking = 1,
     PowerOptimizedTracking = 2,
     Inactive = 3,
+}
+
+/// Space vehicle information
+#[ubx_packet_recv]
+#[ubx(class = 1, id = 0x26, fixed_payload_len = 24)]
+struct NavTimeLs {
+    /// GPS Millisecond Time of Week
+    itow: u32,
+    /// Message version (0x00 for this version)
+    version: u8,
+    /// Reserved
+    reserved1: [u8; 3],
+    /// Information source for the current number of leap seconds
+    #[ubx(map_type = LsSource)]
+    src_of_curr_ls: u8,
+    /// Current number of leap seconds since
+    /// start of GPS time (Jan 6, 1980). It reflects
+    /// how much GPS time is ahead of UTC time.
+    /// Galileo number of leap seconds is the
+    /// same as GPS. BeiDou number of leap
+    /// seconds is 14 less than GPS. GLONASS
+    /// follows UTC time, so no leap seconds.
+    curr_ls: i8,
+    /// Information source for the future leap second event.
+    #[ubx(map_type = LsSourceChange)]
+    src_of_ls_change: u8,
+    /// Future leap second change if one is
+    /// scheduled. +1 = positive leap second, -1 =
+    /// negative leap second, 0 = no future leap
+    /// second event scheduled or no information
+    /// available
+    ls_change: i8,
+    /// Number of seconds until the next leap
+    /// second event, or from the last leap second
+    /// event if no future event scheduled. If > 0
+    /// event is in the future, = 0 event is now, < 0
+    /// event is in the past. Valid only if
+    /// validTimeToLsEvent = 1.
+    time_to_ls_event: i32,
+    /// GPS week number (WN) of the next leap
+    /// second event or the last one if no future
+    /// event scheduled. Valid only if
+    /// validTimeToLsEvent = 1.
+    date_of_ls_gps_wn: u16,
+    /// GPS day of week number (DN) for the next
+    /// leap second event or the last one if no
+    /// future event scheduled. Valid only if
+    /// validTimeToLsEvent = 1. (GPS and Galileo
+    /// DN: from 1 = Sun to 7 = Sat. BeiDou DN:
+    /// from 0 = Sun to 6 = Sat.)
+    date_of_ls_gps_dn: u16,
+    /// Reserved
+    reserved2: [u8; 3],
+    /// Validity flags
+    #[ubx(map_type = LsValidityFlags)]
+    valid: u8,
+}
+
+/// Information source for the current number of leap seconds
+#[ubx_extend]
+#[ubx(from, rest_reserved)]
+#[repr(u8)]
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
+pub enum LsSource {
+    /// hardcoded in the firmware, can be outdated
+    Default = 0,
+    /// Derived from time difference between GPS and GLONASS time
+    Derived = 1,
+    GPS = 2,
+    SBAS = 3,
+    Beidou = 4,
+    Galileo = 5,
+    AidedData = 6,
+    Configured = 7,
+    NavIC = 8,
+    Unknown = 255,
+}
+
+/// Information source for the future leap second event.
+#[ubx_extend]
+#[ubx(from, rest_reserved)]
+#[repr(u8)]
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
+pub enum LsSourceChange {
+    NoSource = 0,
+    GPS = 2,
+    SBAS = 3,
+    Beidou = 4,
+    Galileo = 5,
+    GLONASS = 6,
+    NavIC = 7,
+}
+
+#[ubx_extend_bitflags]
+#[ubx(from, rest_reserved)]
+bitflags! {
+    /// Validity flags for the leap second information
+    pub struct LsValidityFlags: u8 {
+        /// Valid current number of leap seconds value
+        const VALID_CURR_LS = 1;
+        /// Valid time to next leap second event or from the last leap second event if no future event scheduled
+        const VALID_TIME_TO_LS_EVENT = 2;
+    }
+}
+
+/// Space vehicle information
+#[ubx_packet_recv]
+#[ubx(class = 1, id = 0x30, max_payload_len = 3068)]
+struct NavSvInfo {
+    /// GPS Millisecond Time of Week
+    itow: u32,
+    /// Number of channels
+    numch: u8,
+    /// Bitmask
+    #[ubx(map_type = GlobalFlags)]
+    global_flags: u8,
+    /// Reserved
+    reserved1: u16,
+    #[ubx(map_type = Vec<nav_svinfo::SvInfo>, from = nav_svinfo::convert_to_payload)]
+    data: [u8; 0],
+}
+
+/// ChipGen
+#[ubx_extend]
+#[ubx(from, rest_reserved)]
+#[repr(u8)]
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
+pub enum GlobalFlags {
+    AntarisAntaris4 = 0,
+    Ublox5 = 1,
+    Ublox6 = 2,
+    Ublox7 = 3,
+    Ublox8UbloxM8 = 4,
+}
+
+/// Bitfield flags per satellite
+#[ubx_extend_bitflags]
+#[ubx(from, rest_reserved)]
+bitflags! {
+    /// Fix status flags for `NavPosVelTime`
+    pub struct BitFieldFlags: u8 {
+        /// SV is used for navigation
+        const SV_USED = 1;
+        /// Differential correction data is available for this SV
+        const DIFF_CORR = 2;
+        /// Orbit information is available for this SV (Ephemeris or Almanac)
+        const ORBIT_AVAILABLE = 4;
+        /// Orbit information is Ephemeris
+        const ORBIT_EPH_AVAILABLE = 8;
+        /// SV is unhealthy / shall not be used
+        const UNHEALTHY = 16;
+        /// Orbit information is Almanac Plus
+        const  ORBIT_ALM_AVAILABLE = 32;
+        /// Orbit information is AssistNow Autonomous
+        const  ORBIT_AOP_AVAILABLE = 64;
+        /// Carrier smoothed pseudorange used
+        const SMOOTHED = 128;
+    }
+}
+
+/// Signal Quality
+#[ubx_extend]
+#[ubx(from, rest_reserved)]
+#[repr(u8)]
+#[derive(Debug, Copy, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum BitFieldQuality {
+    NoSignal = 0,
+    SearchingSignal = 1,
+    SignalAcquired = 2,
+    SignalDetectedButUnusable = 3,
+    CodeLockedAndTimeSynchronized = 4,
+    CodeAndCarrierLockedAndTimeSynchronized = 5,
+    CodeAndCarrierLockedAndTimeSynchronizedAndPseudorangeValid = 6,
+    CodeAndCarrierLockedAndTimeSynchronizedAndPseudorangeAndCodePhaseValid = 7,
+}
+
+mod nav_svinfo {
+    use super::*;
+
+    #[derive(Copy, Clone, Debug, serde::Serialize, serde::Deserialize)]
+    pub struct SvInfo {
+        /// Channel number, 255 for SVs not assigned to a channel
+        chn: u8,
+        /// Satellite ID, see Satellite Numbering for assignment
+        svid: u8,
+        /// Bitmask
+        flags: BitFieldFlags,
+        /// Bitfield
+        quality: BitFieldQuality,
+        /// Carrier to Noise Ratio (Signal Strength) in dBHZ
+        cno: u8,
+        /// Elevation in integer degrees
+        elev: i8,
+        /// Azimuth in integer degrees
+        azim: i16,
+        /// Pseudo range residual in centimeters
+        pr_res: i32,
+    }
+
+    pub(crate) fn convert_to_payload(bytes: &[u8]) -> Vec<SvInfo> {
+        let mut res = Vec::new();
+        let mut iter = bytes.iter();
+        while iter.len() >= 12 {
+            let chn = iter.next().unwrap();
+            let svid = iter.next().unwrap();
+            let flags = iter.next().unwrap();
+            let quality = iter.next().unwrap();
+            let cno = iter.next().unwrap();
+            let elev = iter.next().unwrap();
+            let azim = [*iter.next().unwrap(), *iter.next().unwrap()];
+            let pr_res = [
+                *iter.next().unwrap(),
+                *iter.next().unwrap(),
+                *iter.next().unwrap(),
+                *iter.next().unwrap(),
+            ];
+            res.push(SvInfo {
+                chn: *chn,
+                svid: *svid,
+                flags: BitFieldFlags::from(*flags),
+                quality: BitFieldQuality::from(*quality),
+                cno: *cno,
+                elev: i8::from_le_bytes([*elev]),
+                azim: i16::from_le_bytes(azim),
+                pr_res: i32::from_le_bytes(pr_res),
+            });
+        }
+        res
+    }
+}
+
+/// SBAS status data
+#[ubx_packet_recv]
+#[ubx(class = 1, id = 0x32, max_payload_len = 3072)]
+struct NavSbas {
+    /// GPS Millisecond Time of Week
+    itow: u32,
+    /// PRN Number of the GEO where correction and integrity data is used from
+    geo: u8,
+    /// SBAS Mode
+    #[ubx(map_type = SbasMode)]
+    mode: u8,
+    /// SBAS System (WAAS/EGNOS/...)
+    #[ubx(map_type = SbasSystem)]
+    sys: i8,
+    /// SBAS Services available
+    #[ubx(map_type = ServiceBitFlags)]
+    service: u8,
+    /// Number of SV data following
+    cnt: u8,
+    #[ubx(map_type = BitFieldStatusFlags)]
+    /// SBAS status flags
+    status_flags: u8,
+    /// Reserved
+    reserved1: u16,
+    #[ubx(map_type = Vec<nav_sbas::SbasInfo>, from = nav_sbas::convert_to_payload)]
+    data: [u8; 0],
+}
+
+/// Signal Quality
+#[ubx_extend]
+#[ubx(from, rest_reserved)]
+#[repr(u8)]
+#[derive(Debug, Copy, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum SbasMode {
+    Disabled = 0,
+    EnabledIntegrity = 1,
+    EnabledTestMode = 3,
+}
+
+/// SBAS System (WAAS/EGNOS/...)
+#[ubx_extend]
+#[ubx(from, rest_reserved)]
+#[repr(i8)]
+#[derive(Debug, Copy, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum SbasSystem {
+    Unknown = -1,
+    WAAS = 0,
+    EGNOS = 1,
+    MSAS = 2,
+    GAGAN = 3,
+    GPS = 16,
+}
+
+/// SBAS Services available bitflags
+#[ubx_extend_bitflags]
+#[ubx(from, rest_reserved)]
+bitflags! {
+    /// Fix status flags for `NavPosVelTime`
+    pub struct ServiceBitFlags: u8 {
+        /// GEO may be used as ranging source
+        const RANGING = 1;
+        /// GEO is providing correction data
+        const CORRECTIONS = 2;
+        /// GEO is providing integrity
+        const INTEGRITY = 4;
+        /// GEO is in test mode
+        const TESTMODE = 8;
+        /// Problem with signal or broadcast data indicated
+        const BAD = 16;
+    }
+}
+
+/// SBAS status flags
+#[ubx_extend]
+#[ubx(from, rest_reserved)]
+#[repr(u8)]
+#[derive(Debug, Copy, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum BitFieldStatusFlags {
+    Unknown = 0,
+    NoIntegrity = 1,
+    GoodIntegrity = 2,
+}
+
+mod nav_sbas {
+    use super::*;
+
+    #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+    pub struct SbasInfo {
+        /// SV ID
+        svid: u8,
+        /// Flags for this SV
+        flags: BitFieldStatusFlags,
+        /// Monitoring status
+        udre: u8,
+        /// System (WAAS/EGNOS/...) same as SYS
+        svsys: SbasSystem,
+        /// Services available same as SERVICE
+        svservice: ServiceBitFlags,
+        /// Reserved
+        reserved2: u8,
+        /// Pseudo Range correction in [cm]
+        prc: i16,
+        /// Reserved
+        reserved3: u16,
+        /// Ionosphere correction in [cm]
+        ic: i16,
+    }
+
+    pub(crate) fn convert_to_payload(bytes: &[u8]) -> Vec<SbasInfo> {
+        let mut res = Vec::new();
+        let mut iter = bytes.iter();
+        while iter.len() >= 12 {
+            let svid = iter.next().unwrap();
+            let flags = iter.next().unwrap();
+            let udre = iter.next().unwrap();
+            let svsys = iter.next().unwrap();
+            let svservice = iter.next().unwrap();
+            let reserved2 = iter.next().unwrap();
+            let prc = [*iter.next().unwrap(), *iter.next().unwrap()];
+            let reserved3 = [*iter.next().unwrap(), *iter.next().unwrap()];
+            let ic = [*iter.next().unwrap(), *iter.next().unwrap()];
+            res.push(SbasInfo {
+                svid: *svid,
+                flags: BitFieldStatusFlags::from(*flags),
+                udre: *udre,
+                svsys: SbasSystem::from(*svsys as i8),
+                svservice: ServiceBitFlags::from(*svservice),
+                reserved2: *reserved2,
+                prc: i16::from_le_bytes(prc),
+                reserved3: u16::from_le_bytes(reserved3),
+                ic: i16::from_le_bytes(ic),
+            });
+        }
+        res
+    }
+}
+
+/// SBAS status data
+#[ubx_packet_recv]
+#[ubx(class = 1, id = 0x35, max_payload_len = 3068)]
+struct NavSat {
+    /// GPS Millisecond Time of Week
+    itow: u32,
+    /// Message version (0x01 for this version)
+    version: u8,
+    /// Number of satellites
+    numsvs: u8,
+    /// Reserved
+    reserved1: i8,
+    #[ubx(map_type = Vec<nav_sat::SatInfo>, from = nav_sat::convert_to_payload)]
+    data: [u8; 0],
+}
+
+/// Sat Bitmask
+#[ubx_extend_bitflags]
+#[ubx(from, rest_reserved)]
+bitflags! {
+    /// Fix status flags for `NavPosVelTime`
+    pub struct _NavServiceBitFlags: u32 {
+        /// GEO may be used as ranging source
+        const QUALITY_IND = 1;
+        /// GEO is providing correction data
+        const SV_USED = 2;
+        /// GEO is providing integrity
+        const HEALTH = 4;
+        /// GEO is in test mode
+        const TESTMODE = 8;
+        /// Problem with signal or broadcast data indicated
+        const BAD = 16;
+    }
+}
+
+mod nav_sat {
+    use super::*;
+
+    #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+    pub struct SatInfo {
+        /// GNSS identifier
+        gnssid: u8,
+        /// Satellite identifier
+        svid: u8,
+        /// Carrier to noise ratio (signal strength) in dBHz
+        cno: u8,
+        /// Elevation (range: +/-90), unknown if out of range
+        elev: i8,
+        /// Azimuth (range 0-360), unknown if elevation is out of range
+        azim: i16,
+        /// Pseudorange residual in meters
+        prres: i16,
+        /// Bitfield flags
+        flags: NavServiceBitFlags,
+    }
+
+    #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+    pub struct NavServiceBitFlags {
+        /// Signal quality indicator
+        quality_ind: QualityIndicator,
+        /// Signal in the subset specified in Signal Identifiers is currently being used for navigation
+        sv_used: bool,
+        /// Signal health flag
+        health: Health,
+        /// Differential correction data is available for this SV
+        diff_corr: bool,
+        /// Carrier smoothed pseudorange used
+        smoothed: bool,
+        /// Orbit source
+        orbit_source: OrbitSource,
+        /// Ephemeris is available for this SV
+        eph_available: bool,
+        /// Almanac is available for this SV
+        alm_available: bool,
+        /// AssistNow Offline data is available for this SV
+        ano_available: bool,
+        /// AssistNow Autonomous data is available for this SV
+        aop_available: bool,
+        /// SBAS corrections have been used for a signal
+        sbas_corr_used: bool,
+        /// RTCM corrections have been used for a signal
+        rtcm_corr_used: bool,
+        /// QZSS SLAS corrections have been used for a signal
+        slas_corr_used: bool,
+        /// SPARTN corrections have been used for a signal
+        spartn_corr_used: bool,
+        /// Pseudorange corrections have been used for a signal
+        pr_corr_used: bool,
+        /// Carrier range corrections have been used for a signal
+        cr_corr_used: bool,
+        /// Range rate (Doppler) corrections have been used for a signal
+        do_corr_used: bool,
+        /// CLAS corrections have been used for a signal
+        clas_corr_used: bool,
+    }
+
+    impl NavServiceBitFlags {
+        fn from_u32(long: u32) -> Self {
+            Self {
+                quality_ind: QualityIndicator::from((long & 0b111) as u8),
+                sv_used: (long & 0b1111) != 0,
+                health: Health::from(((long >> 4) & 0b11) as u8),
+                diff_corr: (long & 0b1111111) != 0,
+                smoothed: (long & 0b11111111) != 0,
+                orbit_source: OrbitSource::from(((long >> 8) & 0b111) as u8),
+                eph_available: (long & 0b11111111111) != 0,
+                alm_available: (long & 0b111111111111) != 0,
+                ano_available: (long & 0b1111111111111) != 0,
+                aop_available: (long & 0b11111111111111) != 0,
+                sbas_corr_used: (long & 0b1111111111111111) != 0,
+                rtcm_corr_used: (long & 0b11111111111111111) != 0,
+                slas_corr_used: (long & 0b111111111111111111) != 0,
+                spartn_corr_used: (long & 0b1111111111111111111) != 0,
+                pr_corr_used: (long & 0b11111111111111111111) != 0,
+                cr_corr_used: (long & 0b111111111111111111111) != 0,
+                do_corr_used: (long & 0b1111111111111111111111) != 0,
+                clas_corr_used: (long & 0b11111111111111111111111) != 0,
+            }
+        }
+    }
+
+    /// Signal quality indicator
+    #[ubx_extend]
+    #[ubx(from, rest_reserved)]
+    #[repr(u8)]
+    #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+    pub enum QualityIndicator {
+        NoSignal = 0,
+        SearchingSignal = 1,
+        SignalAcquired = 2,
+        SignalDetectedButUnusable = 3,
+        CodeLockedAndTimeSynchronized = 4,
+        CodeAndCarrierLockedAndTimeSynchronized = 5,
+        CodeAndCarrierLockedAndTimeSynchronizedAndPseudorangeValid = 6,
+        CodeAndCarrierLockedAndTimeSynchronizedAndPseudorangeAndCodePhaseValid = 7,
+    }
+
+    /// Signal health flag
+    #[ubx_extend]
+    #[ubx(from, rest_reserved)]
+    #[repr(u8)]
+    #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+    pub enum Health {
+        Unknown = 0,
+        Healthy = 1,
+        Unhealthy = 2,
+    }
+
+    /// Orbit source
+    #[ubx_extend]
+    #[ubx(from, rest_reserved)]
+    #[repr(u8)]
+    #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+    pub enum OrbitSource {
+        NoOrbitInformation = 0,
+        EphemerIsUsed = 1,
+        AlmanacIsUsed = 2,
+        AssistNowOfflineOrbitIsUsed = 3,
+        AssistNowAutonomousOrbitIsUsed = 4,
+        OtherOrbitInformationIsUsed = 5,
+        OtherOrbitInformationIsUsed2 = 6,
+        OtherOrbitInformationIsUsed3 = 7,
+    }
+
+    pub(crate) fn convert_to_payload(bytes: &[u8]) -> Vec<SatInfo> {
+        let mut res = Vec::new();
+        let mut iter = bytes.iter();
+        while iter.len() >= 12 {
+            let gnssid = iter.next().unwrap();
+            let svid = iter.next().unwrap();
+            let cno = iter.next().unwrap();
+            let elev = iter.next().unwrap();
+            let azim = [*iter.next().unwrap(), *iter.next().unwrap()];
+            let prres = [*iter.next().unwrap(), *iter.next().unwrap()];
+            let flags = [
+                *iter.next().unwrap(),
+                *iter.next().unwrap(),
+                *iter.next().unwrap(),
+                *iter.next().unwrap(),
+            ];
+            res.push(SatInfo {
+                gnssid: *gnssid,
+                svid: *svid,
+                cno: *cno,
+                elev: *elev as i8,
+                azim: i16::from_le_bytes(azim),
+                prres: i16::from_le_bytes(prres),
+                flags: NavServiceBitFlags::from_u32(u32::from_le_bytes(flags)),
+            });
+        }
+        res
+    }
 }
 
 #[ubx_packet_send]
@@ -591,7 +1287,7 @@ struct CfgPrtUart {
 #[ubx_extend]
 #[ubx(from_unchecked, into_raw, rest_error)]
 #[repr(u8)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub enum UartPortId {
     Uart1 = 1,
     Uart2 = 2,
@@ -661,7 +1357,7 @@ bitflags! {
 #[ubx_extend]
 #[ubx(from_unchecked, into_raw, rest_error)]
 #[repr(u8)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub enum SpiPortId {
     Spi = 4,
 }
@@ -901,7 +1597,7 @@ bitflags! {
 #[ubx_extend]
 #[ubx(from_unchecked, into_raw, rest_error)]
 #[repr(u8)]
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
 pub enum CfgNav5DynModel {
     Portable = 0,
     Stationary = 2,
@@ -927,7 +1623,7 @@ impl Default for CfgNav5DynModel {
 #[ubx_extend]
 #[ubx(from_unchecked, into_raw, rest_error)]
 #[repr(u8)]
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
 pub enum CfgNav5FixMode {
     Only2D = 1,
     Only3D = 2,
@@ -944,7 +1640,7 @@ impl Default for CfgNav5FixMode {
 #[ubx_extend]
 #[ubx(from_unchecked, into_raw, rest_error)]
 #[repr(u8)]
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
 pub enum CfgNav5UtcStandard {
     /// receiver selects based on GNSS configuration (see GNSS timebases)
     Automatic = 0,
@@ -1022,6 +1718,59 @@ impl<T: FloatCore + FromPrimitive + ToPrimitive> ScaleBack<T> {
 
 /// Receiver/Software Version
 #[ubx_packet_recv]
+#[ubx(class = 0x13, id = 0x80, max_payload_len = 164)]
+struct MgaDbd {
+    #[ubx(map_type = Vec<u8>, from = mga_dbd::convert_to_payload)]
+    data: [u8; 0],
+}
+
+mod mga_dbd {
+    pub(crate) fn convert_to_payload(bytes: &[u8]) -> Vec<u8> {
+        bytes.to_vec()
+    }
+}
+
+pub struct SerializingIterator<T, U>(T)
+where
+    T: Iterator<Item = U> + Clone,
+    U: serde::Serialize + Debug;
+
+impl<T, U> serde::Serialize for SerializingIterator<T, U>
+where
+    T: Iterator<Item = U> + Clone,
+    U: serde::Serialize + Debug,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.collect_seq(self.0.clone())
+    }
+}
+
+impl<T, U> Iterator for SerializingIterator<T, U>
+where
+    T: Iterator<Item = U> + Clone,
+    U: serde::Serialize + Debug,
+{
+    type Item = U;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next()
+    }
+}
+
+impl<T, U> fmt::Debug for SerializingIterator<T, U>
+where
+    T: Iterator<Item = U> + Clone,
+    U: serde::Serialize + Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_list().entries(self.0.clone()).finish()
+    }
+}
+
+/// Receiver/Software Version
+#[ubx_packet_recv]
 #[ubx(class = 0x0a, id = 0x04, max_payload_len = 1240)]
 struct MonVer {
     #[ubx(map_type = &str, may_fail, from = mon_ver::convert_to_str_unchecked,
@@ -1032,13 +1781,15 @@ struct MonVer {
     hardware_version: [u8; 10],
 
     /// Extended software information strings
-    #[ubx(map_type = impl Iterator<Item=&str>, may_fail,
+    #[ubx(map_type = SerializingIterator<impl Iterator<Item = &str> + Clone, &str>, may_fail,
           from = mon_ver::extension_to_iter,
           is_valid = mon_ver::is_extension_valid)]
     extension: [u8; 0],
 }
 
 mod mon_ver {
+    use super::SerializingIterator;
+
     pub(crate) fn convert_to_str_unchecked(bytes: &[u8]) -> &str {
         let null_pos = bytes
             .iter()
@@ -1071,27 +1822,39 @@ mod mon_ver {
         }
     }
 
-    pub(crate) fn extension_to_iter(payload: &[u8]) -> impl Iterator<Item = &str> {
-        payload.chunks(30).map(|x| convert_to_str_unchecked(x))
+    pub(crate) fn extension_to_iter(
+        payload: &[u8],
+    ) -> SerializingIterator<impl Iterator<Item = &str> + Clone, &str> {
+        SerializingIterator(payload.chunks(30).map(|x| convert_to_str_unchecked(x)))
     }
 }
 
 define_recv_packets!(
     enum PacketRef {
         _ = UbxUnknownPacketRef,
+        NavPosEcef,
+        NavVelEcef,
         NavPosLlh,
         NavStatus,
+        NavAopStatus,
         NavDop,
+        NavTimeGps,
         NavPosVelTime,
         NavSolution,
         NavVelNed,
         NavTimeUTC,
+        NavTimeLs,
+        NavSvInfo,
+        NavSbas,
+        NavSat,
         AlpSrv,
         AckAck,
         AckNak,
         CfgPrtSpi,
         CfgPrtUart,
         CfgNav5,
-        MonVer
+        MonVer,
+        MgaDbd,
+        MgaAck,
     }
 );

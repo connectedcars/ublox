@@ -157,8 +157,38 @@ pub struct UbxExtendEnum {
     pub from_fn: Option<UbxTypeFromFn>,
     pub rest_handling: Option<UbxEnumRestHandling>,
     pub into_fn: Option<UbxTypeIntoFn>,
-    pub variants: Vec<(Ident, u8)>,
+    pub variants: Vec<(Ident, UbxReprType)>,
     pub attrs: Vec<syn::Attribute>,
+}
+#[derive(Debug, Clone, Copy)]
+pub enum UbxReprType {
+    U8(u8),
+    I8(i8),
+}
+
+impl UbxReprType {
+    pub fn as_u8(&self) -> u8 {
+        match self {
+            UbxReprType::U8(x) => *x,
+            _ => panic!(),
+        }
+    }
+
+    pub fn as_i8(&self) -> i8 {
+        match self {
+            UbxReprType::I8(x) => *x,
+            _ => panic!(),
+        }
+    }
+}
+
+impl ToTokens for UbxReprType {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        match self {
+            UbxReprType::U8(x) => x.to_tokens(tokens),
+            UbxReprType::I8(x) => x.to_tokens(tokens),
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
